@@ -2,8 +2,7 @@
 //
 // A Chain is a row of rigid Segments joined end to end. Instead of rotating each
 // joint by hand, we say where we want one end to be and let the chain follow.
-// Used for fish spines (the head leads, the body trails behind) and kelp (the base
-// is pinned to the reef, the tip sways).
+// Used for the fish spines: the head leads and the body trails behind it.
 
 // One rigid stick: it has a start, a fixed length, and an angle that gives its end.
 class Segment {
@@ -47,7 +46,7 @@ class Chain {
     }
   }
 
-  // The free end of the chain (the head of a fish, the top of a kelp).
+  // The free end of the chain (the head of a fish).
   get tip() {
     return this.segments[this.segments.length - 1].end;
   }

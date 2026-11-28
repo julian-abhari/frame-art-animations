@@ -28,7 +28,7 @@ class SunBeams {
     g.noStroke();
     for (let light of this.lights) {
       for (let shaft of light.shafts) {
-        g.fill(190, 235, 255, 9 * shaft.brightness);
+        g.fill(255, 255, 255, 7 * shaft.brightness);
         for (let reach of this.layerReach) {
           g.beginShape();
           g.vertex(light.position.x, light.position.y);

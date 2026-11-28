@@ -17,11 +17,12 @@ Generative p5.js art scenes built for a Samsung Frame TV. Scenes render inside a
 | 1 | Coral Reef | Done |
 | 2–4 | TBD | Not started |
 
-**Scene 1, Coral Reef:** five schools of fish swim through a drifting coral reef.
-- **Marching squares** draws the reef. A noise field is turned into the coral outline, and the fish steer around it and bounce off if they touch it.
-- **Flocking** (separation, alignment, cohesion) moves the fish.
-- **Inverse kinematics** (from the old Multi Inverse Kinematics sketch) gives each fish a spine that trails its head, so bodies bend through turns. The same chains make the swaying kelp.
-- **Raycasting** (from the old Raycasting sketch) makes the sunbeams. Rays are fired from above the screen and stop at the reef edge, so the coral casts shadows.
+**Scene 1, Fish in the Reef** (black, white and deep navy):
+- **Marching squares** is your original sketch: a grid of drifting noise, every cell shaded by its value, with thick lines where the field crosses the threshold. That outline is the reef.
+- **Flocking** (separation, alignment, cohesion) moves the fish, and they bounce off the reef edge.
+- **Inverse kinematics** (from the Multi Inverse Kinematics sketch) makes each fish a thin spine that trails its head. A noise flow field, like the one in the grass sketch, pushes the spines around so the school ripples.
+- **Raycasting** (from the Raycasting sketch) makes the sunbeams. Rays are fired from above the screen and stop at the reef edge, so the reef casts shadows.
+- **Vapor** (from the Slither sketch) is the bubbles: fish give them off, and they float up and fade.
 
 ## Exporting
 
@@ -49,13 +50,13 @@ scenes/
   flocking-marching-squares/   Scene 1
     scene.js                   puts it all together (start here)
     TerrainField.js            noise field + marching squares (the reef)
-    Boid.js, Fish.js           flocking behavior, and the fish body
+    Boid.js, Fish.js           flocking behavior, and the fish spine
     InverseKinematics.js       Segment and Chain
-    Kelp.js, Bubble.js         scenery
+    Vapor.js                   bubbles
     Raycasting.js, SunBeams.js Ray/Boundary/LightSource, and the beams
   _template.js                 starting point for new scenes
 libraries/        p5.js 0.9.0, OpenSimplexNoise, mp4-muxer
-legacy/           original standalone sketches (flocking, raycasting, inverse kinematics), kept for reference
+legacy/           original standalone sketches, kept for reference
 ```
 
 ## Adding a scene
