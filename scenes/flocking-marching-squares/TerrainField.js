@@ -1,154 +1,188 @@
-// Animated scalar field + marching squares.
-// Values above `threshold` are "solid" (walls the boids can't enter).
+// TerrainField: an animated noise field drawn with marching squares.
+// Field values above `threshold` are "solid" walls that the boids can't enter.
 class TerrainField {
-  constructor(w, h, cell, seed, threshold) {
+  constructor(w, h, resolution, seed, threshold) {
     this.w = w;
     this.h = h;
-    this.cell = cell;
-    this.cols = Math.ceil(w / cell) + 1;
-    this.rows = Math.ceil(h / cell) + 1;
+    this.resolution = resolution; // size of one marching-squares cell in pixels
+    this.columns = ceil(w / resolution) + 1;
+    this.rows = ceil(h / resolution) + 1;
     this.threshold = threshold;
-    this.values = new Float32Array(this.cols * this.rows);
-    this.noiseA = new OpenSimplexNoise(seed);
-    this.noiseB = new OpenSimplexNoise(seed + 1013);
-    this._g = { x: 0, y: 0 };
 
-    // Low-res offscreen canvas for the smooth filled terrain.
-    this.imgScale = 4;
-    this.imgW = Math.ceil(w / this.imgScale);
-    this.imgH = Math.ceil(h / this.imgScale);
-    this.img = document.createElement('canvas');
-    this.img.width = this.imgW;
-    this.img.height = this.imgH;
-    this.imgCtx = this.img.getContext('2d');
-    this.imgData = this.imgCtx.createImageData(this.imgW, this.imgH);
+    // One value per grid corner, stored in a flat array: index = j * columns + i
+    this.values = new Array(this.columns * this.rows).fill(0);
+    this.noiseBig = new OpenSimplexNoise(seed);
+    this.noiseSmall = new OpenSimplexNoise(seed + 1013);
+
+    // The smooth colored terrain is painted into a small image, then stretched to full size.
+    this.imageScale = 10; // 1 image pixel = 10x10 scene pixels (keeps painting fast)
+    this.terrainImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
   }
 
-  update(t) {
-    const { cols, rows, cell, values } = this;
-    for (let j = 0; j < rows; j++) {
-      for (let i = 0; i < cols; i++) {
-        const x = i * cell, y = j * cell;
-        const a = this.noiseA.noise3D(x * 0.0019, y * 0.0019, t);
-        const b = this.noiseB.noise3D(x * 0.0046, y * 0.0046, t * 1.4);
-        values[j * cols + i] = a * 0.72 + b * 0.28;
+  // Recompute every grid corner for time `zOffset` (this is what makes the walls drift).
+  update(zOffset) {
+    for (let j = 0; j < this.rows; j += 1) {
+      for (let i = 0; i < this.columns; i += 1) {
+        let x = i * this.resolution;
+        let y = j * this.resolution;
+        let big = this.noiseBig.noise3D(x * 0.0019, y * 0.0019, zOffset);
+        let small = this.noiseSmall.noise3D(x * 0.0046, y * 0.0046, zOffset * 1.4);
+        this.values[j * this.columns + i] = big * 0.72 + small * 0.28;
       }
     }
   }
 
-  // Bilinear sample at world position.
+  // Field value at any pixel position (bilinear blend of the 4 surrounding corners).
   sample(x, y) {
-    const { cols, rows, cell, values } = this;
-    let fx = x / cell, fy = y / cell;
-    if (fx < 0) fx = 0; else if (fx > cols - 1.001) fx = cols - 1.001;
-    if (fy < 0) fy = 0; else if (fy > rows - 1.001) fy = rows - 1.001;
-    const i = fx | 0, j = fy | 0;
-    const u = fx - i, v = fy - j;
-    const k = j * cols + i;
-    const top = values[k] * (1 - u) + values[k + 1] * u;
-    const bot = values[k + cols] * (1 - u) + values[k + cols + 1] * u;
-    return top * (1 - v) + bot * v;
+    let fx = constrain(x / this.resolution, 0, this.columns - 1.001);
+    let fy = constrain(y / this.resolution, 0, this.rows - 1.001);
+    let i = floor(fx);
+    let j = floor(fy);
+    let k = j * this.columns + i;
+    let top = lerp(this.values[k], this.values[k + 1], fx - i);
+    let bottom = lerp(this.values[k + this.columns], this.values[k + this.columns + 1], fx - i);
+    return lerp(top, bottom, fy - j);
   }
 
-  // Gradient (points toward higher field = into the wall). Returns shared object.
+  // Direction the field increases fastest (i.e. pointing into a wall).
   gradient(x, y) {
-    const e = this.cell * 0.5;
-    this._g.x = this.sample(x + e, y) - this.sample(x - e, y);
-    this._g.y = this.sample(x, y + e) - this.sample(x, y - e);
-    return this._g;
+    let e = this.resolution * 0.5;
+    return createVector(
+      this.sample(x + e, y) - this.sample(x - e, y),
+      this.sample(x, y + e) - this.sample(x, y - e)
+    );
   }
 
-  // Marching squares: strokes all contour segments for `level` in one path.
-  strokeContour(ctx, level) {
-    const { cols, rows, cell, values } = this;
-    ctx.beginPath();
-    for (let j = 0; j < rows - 1; j++) {
-      for (let i = 0; i < cols - 1; i++) {
-        const k = j * cols + i;
-        const tl = values[k], tr = values[k + 1];
-        const bl = values[k + cols], br = values[k + cols + 1];
-        const idx = (tl > level ? 8 : 0) | (tr > level ? 4 : 0) | (br > level ? 2 : 0) | (bl > level ? 1 : 0);
-        if (idx === 0 || idx === 15) continue;
-        const x0 = i * cell, y0 = j * cell;
-        // Edge points by linear interpolation: 0 top, 1 right, 2 bottom, 3 left
-        const pt = (e) => {
-          switch (e) {
-            case 0: return [x0 + cell * ((level - tl) / (tr - tl)), y0];
-            case 1: return [x0 + cell, y0 + cell * ((level - tr) / (br - tr))];
-            case 2: return [x0 + cell * ((level - bl) / (br - bl)), y0 + cell];
-            default: return [x0, y0 + cell * ((level - tl) / (bl - tl))];
-          }
-        };
-        let segs;
-        switch (idx) {
-          case 1: case 14: segs = [[2, 3]]; break;
-          case 2: case 13: segs = [[1, 2]]; break;
-          case 3: case 12: segs = [[1, 3]]; break;
-          case 4: case 11: segs = [[0, 1]]; break;
-          case 6: case 9: segs = [[0, 2]]; break;
-          case 7: case 8: segs = [[0, 3]]; break;
-          case 5: segs = ((tl + tr + bl + br) / 4 > level) ? [[0, 3], [1, 2]] : [[0, 1], [2, 3]]; break;
-          default: segs = ((tl + tr + bl + br) / 4 > level) ? [[0, 1], [2, 3]] : [[0, 3], [1, 2]]; break; // 10
-        }
-        for (const [a, b] of segs) {
-          const p = pt(a), q = pt(b);
-          ctx.moveTo(p[0], p[1]);
-          ctx.lineTo(q[0], q[1]);
-        }
-      }
-    }
-    ctx.stroke();
+  // ---- Drawing ----
+
+  draw(g) {
+    this.paintTerrain();
+    g.image(this.terrainImage, 0, 0, this.w, this.h);
+
+    g.noFill();
+    g.strokeCap(ROUND);
+    let T = this.threshold;
+
+    // Faint topographic rings around the walls
+    g.strokeWeight(1.5);
+    g.stroke(120, 150, 255, 26);
+    this.drawContour(g, T - 0.16);
+    this.drawContour(g, T - 0.32);
+    g.stroke(255, 170, 120, 30);
+    this.drawContour(g, T + 0.18);
+    this.drawContour(g, T + 0.36);
+
+    // The wall edge: wide soft glow, medium glow, bright core
+    g.strokeWeight(14);
+    g.stroke(255, 150, 70, 40);
+    this.drawContour(g, T);
+    g.strokeWeight(6);
+    g.stroke(255, 190, 110, 76);
+    this.drawContour(g, T);
+    g.strokeWeight(2.2);
+    g.stroke(255, 236, 190, 240);
+    this.drawContour(g, T);
   }
 
-  // Paint the filled terrain/background into the low-res canvas.
-  renderImage() {
-    const { imgW, imgH, imgScale, imgData, threshold: T } = this;
-    const d = imgData.data;
-    let p = 0;
-    for (let py = 0; py < imgH; py++) {
-      for (let px = 0; px < imgW; px++) {
-        const f = this.sample((px + 0.5) * imgScale, (py + 0.5) * imgScale);
+  // Fill the small image: dark glowing "air" below the threshold, purple "rock" above it.
+  paintTerrain() {
+    let img = this.terrainImage;
+    let T = this.threshold;
+    img.loadPixels();
+    for (let py = 0; py < img.height; py += 1) {
+      for (let px = 0; px < img.width; px += 1) {
+        let f = this.sample((px + 0.5) * this.imageScale, (py + 0.5) * this.imageScale);
         let r, g, b;
         if (f > T) {
-          const t = Math.min(1, (f - T) / 0.55);
-          r = 46 + t * 120; g = 18 + t * 26; b = 96 + t * 40;
+          let t = constrain(map(f, T, T + 0.55, 0, 1), 0, 1);
+          r = lerp(46, 166, t);
+          g = lerp(18, 44, t);
+          b = lerp(96, 136, t);
         } else {
-          const depth = Math.min(1, (T - f) / 1.0);
-          const glow = Math.exp(-(T - f) * 7) * 38;
+          let depth = constrain(T - f, 0, 1);
+          let glow = exp(-(T - f) * 7) * 38;
           r = 12 - depth * 5 + glow * 0.9;
           g = 18 - depth * 6 + glow * 0.35;
           b = 46 - depth * 16 + glow * 0.8;
         }
-        d[p++] = r; d[p++] = g; d[p++] = b; d[p++] = 255;
+        let p = 4 * (py * img.width + px);
+        img.pixels[p] = r;
+        img.pixels[p + 1] = g;
+        img.pixels[p + 2] = b;
+        img.pixels[p + 3] = 255;
       }
     }
-    this.imgCtx.putImageData(imgData, 0, 0);
+    img.updatePixels();
   }
 
-  draw(g) {
-    const ctx = g.drawingContext;
-    this.renderImage();
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(this.img, 0, 0, this.w, this.h);
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    const T = this.threshold;
-    // Faint topographic rings
-    ctx.strokeStyle = 'rgba(120,150,255,0.10)'; ctx.lineWidth = 1.5;
-    this.strokeContour(ctx, T - 0.16);
-    this.strokeContour(ctx, T - 0.32);
-    ctx.strokeStyle = 'rgba(255,170,120,0.12)';
-    this.strokeContour(ctx, T + 0.18);
-    this.strokeContour(ctx, T + 0.36);
-    // Wall edge: glow + core
-    ctx.strokeStyle = 'rgba(255,150,70,0.16)'; ctx.lineWidth = 14;
-    this.strokeContour(ctx, T);
-    ctx.strokeStyle = 'rgba(255,190,110,0.30)'; ctx.lineWidth = 6;
-    this.strokeContour(ctx, T);
-    ctx.strokeStyle = 'rgba(255,236,190,0.95)'; ctx.lineWidth = 2.2;
-    this.strokeContour(ctx, T);
-    ctx.restore();
+  // Marching squares for one iso-level: look at each cell's 4 corners, pick the
+  // matching line pattern, and draw it with the end points slid along each edge.
+  drawContour(g, level) {
+    for (let i = 0; i < this.columns - 1; i += 1) {
+      for (let j = 0; j < this.rows - 1; j += 1) {
+        let k = j * this.columns + i;
+        let tl = this.values[k];
+        let tr = this.values[k + 1];
+        let bl = this.values[k + this.columns];
+        let br = this.values[k + this.columns + 1];
+        let state = getState(tl > level, tr > level, br > level, bl > level);
+        if (state === 0 || state === 15) continue;
+
+        // a = top edge, b = right edge, c = bottom edge, d = left edge
+        let x = i * this.resolution;
+        let y = j * this.resolution;
+        let r = this.resolution;
+        let a = createVector(x + r * inverseLerp(tl, tr, level), y);
+        let b = createVector(x + r, y + r * inverseLerp(tr, br, level));
+        let c = createVector(x + r * inverseLerp(bl, br, level), y + r);
+        let d = createVector(x, y + r * inverseLerp(tl, bl, level));
+        drawState(g, state, a, b, c, d);
+      }
+    }
   }
+}
+
+// Where between two values `level` falls (0 to 1). Used to smooth the contour lines.
+function inverseLerp(v0, v1, level) {
+  return (level - v0) / (v1 - v0);
+}
+
+// Turn the 4 corners (true/false) into a number 0-15.
+function getState(a, b, c, d) {
+  return a * 8 + b * 4 + c * 2 + d * 1;
+}
+
+function drawState(g, state, a, b, c, d) {
+  switch (state) {
+    case 1: case 14:
+      quickLine(g, c, d);
+      break;
+    case 2: case 13:
+      quickLine(g, b, c);
+      break;
+    case 3: case 12:
+      quickLine(g, b, d);
+      break;
+    case 4: case 11:
+      quickLine(g, a, b);
+      break;
+    case 5:
+      quickLine(g, b, c);
+      quickLine(g, a, d);
+      break;
+    case 6: case 9:
+      quickLine(g, a, c);
+      break;
+    case 7: case 8:
+      quickLine(g, a, d);
+      break;
+    case 10:
+      quickLine(g, a, b);
+      quickLine(g, c, d);
+      break;
+  }
+}
+
+function quickLine(g, a, b) {
+  g.line(a.x, a.y, b.x, b.y);
 }

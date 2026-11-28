@@ -1,142 +1,197 @@
-// A boid that flocks (separation/alignment/cohesion) and reacts to a TerrainField.
+// A boid: flocks with its neighbors and reacts to the TerrainField walls.
 class Boid {
-  constructor(x, y, rand) {
-    const a = rand() * Math.PI * 2;
-    this.x = x; this.y = y;
-    this.vx = Math.cos(a) * 1.5; this.vy = Math.sin(a) * 1.5;
-    this.ax = 0; this.ay = 0;
-    this.size = 4.5;
+  constructor(x, y) {
+    this.position = createVector(x, y);
+    this.velocity = p5.Vector.random2D().mult(1.5);
+    this.acceleration = createVector(0, 0);
+    this.radius = 4.5;
     this.maxSpeed = 3.4;
     this.maxForce = 0.16;
-    this.hue = 175 + rand() * 50; // teal -> blue
-    this.trail = [];
+    this.hue = random(175, 225); // teal to blue (drawn in HSB)
+    this.trail = [];             // recent positions, drawn as a fading tail
   }
 
-  run(boids, field, params, W, H) {
+  run(boids, field, params) {
     this.flock(boids, params);
     this.avoidWalls(field, params);
-    this.update(field, W, H);
+    this.update();
+    this.collide(field);
+    this.borders(field);
+    this.recordTrail();
   }
 
-  steer(dx, dy, limit) {
-    // desired direction (dx,dy) -> steering force limited to `limit`
-    const m = Math.hypot(dx, dy);
-    if (m === 0) return [0, 0];
-    let sx = (dx / m) * this.maxSpeed - this.vx;
-    let sy = (dy / m) * this.maxSpeed - this.vy;
-    const sm = Math.hypot(sx, sy);
-    if (sm > limit) { sx = sx / sm * limit; sy = sy / sm * limit; }
-    return [sx, sy];
+  applyForce(force) {
+    this.acceleration.add(force);
   }
+
+  update() {
+    this.velocity.add(this.acceleration);
+    this.velocity.limit(this.maxSpeed);
+    this.position.add(this.velocity);
+    this.acceleration.mult(0);
+  }
+
+  // ---- Flocking ----
 
   flock(boids, params) {
-    const sepD2 = 28 * 28, nbD2 = 60 * 60;
-    let sx = 0, sy = 0, sc = 0;
-    let ax = 0, ay = 0, cx = 0, cy = 0, nc = 0;
-    for (let i = 0; i < boids.length; i++) {
-      const o = boids[i];
-      if (o === this) continue;
-      const dx = this.x - o.x, dy = this.y - o.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < nbD2) {
-        ax += o.vx; ay += o.vy; cx += o.x; cy += o.y; nc++;
-        if (d2 < sepD2 && d2 > 0) { const d = Math.sqrt(d2); sx += dx / d / d; sy += dy / d / d; sc++; }
-      }
-    }
-    if (sc > 0) {
-      const f = this.steer(sx / sc, sy / sc, this.maxForce);
-      this.ax += f[0] * params.separation; this.ay += f[1] * params.separation;
-    }
-    if (nc > 0) {
-      const fa = this.steer(ax / nc, ay / nc, this.maxForce);
-      this.ax += fa[0] * params.alignment; this.ay += fa[1] * params.alignment;
-      const fc = this.steer(cx / nc - this.x, cy / nc - this.y, this.maxForce);
-      this.ax += fc[0] * params.cohesion; this.ay += fc[1] * params.cohesion;
-    }
+    let neighbors = this.findNeighbors(boids);
+    let separateForce = this.separate(neighbors);
+    let alignmentForce = this.align(neighbors);
+    let cohesionForce = this.cohesion(neighbors);
+
+    separateForce.mult(params.separation);
+    alignmentForce.mult(params.alignment);
+    cohesionForce.mult(params.cohesion);
+
+    this.applyForce(separateForce);
+    this.applyForce(alignmentForce);
+    this.applyForce(cohesionForce);
   }
 
-  // Soft steering: look ahead and turn away from walls before touching them.
+  // Measure distance to every other boid once, keep the ones that are close.
+  findNeighbors(boids) {
+    let neighborDistance = 60;
+    let neighbors = [];
+    for (let other of boids) {
+      let distance = dist(this.position.x, this.position.y, other.position.x, other.position.y);
+      if (distance > 0 && distance < neighborDistance) {
+        neighbors.push({ boid: other, distance: distance });
+      }
+    }
+    return neighbors;
+  }
+
+  // Steer away from boids that are too close.
+  separate(neighbors) {
+    let desiredSeparation = 28;
+    let separateForce = createVector(0, 0);
+    let count = 0;
+    for (let n of neighbors) {
+      if (n.distance < desiredSeparation) {
+        let difference = p5.Vector.sub(this.position, n.boid.position);
+        difference.normalize();
+        difference.div(n.distance); // closer neighbors push harder
+        separateForce.add(difference);
+        count += 1;
+      }
+    }
+    if (count > 0) {
+      separateForce.div(count);
+      separateForce.setMag(this.maxSpeed);
+      separateForce.sub(this.velocity); // steering = desired - velocity
+      separateForce.limit(this.maxForce);
+    }
+    return separateForce;
+  }
+
+  // Steer to match the average heading of neighbors.
+  align(neighbors) {
+    if (neighbors.length === 0) return createVector(0, 0);
+    let average = createVector(0, 0);
+    for (let n of neighbors) {
+      average.add(n.boid.velocity);
+    }
+    average.setMag(this.maxSpeed);
+    let steeringForce = p5.Vector.sub(average, this.velocity);
+    steeringForce.limit(this.maxForce);
+    return steeringForce;
+  }
+
+  // Steer toward the center of nearby boids.
+  cohesion(neighbors) {
+    if (neighbors.length === 0) return createVector(0, 0);
+    let center = createVector(0, 0);
+    for (let n of neighbors) {
+      center.add(n.boid.position);
+    }
+    center.div(neighbors.length);
+    return this.seek(center);
+  }
+
+  // Steering force toward a target = desired velocity - current velocity.
+  seek(target) {
+    let desired = p5.Vector.sub(target, this.position);
+    desired.setMag(this.maxSpeed);
+    let steeringForce = p5.Vector.sub(desired, this.velocity);
+    steeringForce.limit(this.maxForce);
+    return steeringForce;
+  }
+
+  // ---- Reacting to the marching squares ----
+
+  // Look a little ahead; if a wall is coming up, turn away from it.
   avoidWalls(field, params) {
-    const T = field.threshold;
-    const speed = Math.hypot(this.vx, this.vy) || 1;
-    for (const look of [14, 32]) {
-      const px = this.x + (this.vx / speed) * look;
-      const py = this.y + (this.vy / speed) * look;
-      const f = field.sample(px, py);
-      if (f > T - 0.06) {
-        const g = field.gradient(px, py);
-        const m = Math.hypot(g.x, g.y);
-        if (m > 1e-6) {
-          const k = params.avoidance * Math.min(1, (f - (T - 0.06)) * 8 + 0.25);
-          this.ax -= (g.x / m) * this.maxForce * k;
-          this.ay -= (g.y / m) * this.maxForce * k;
-        }
+    let margin = 0.06;
+    for (let lookAhead of [14, 32]) {
+      let ahead = p5.Vector.add(this.position, this.velocity.copy().setMag(lookAhead));
+      let value = field.sample(ahead.x, ahead.y);
+      if (value > field.threshold - margin) {
+        // The gradient points into the wall, so push the opposite way.
+        let away = field.gradient(ahead.x, ahead.y).mult(-1);
+        let strength = constrain((value - (field.threshold - margin)) * 8 + 0.25, 0, 1);
+        away.setMag(this.maxForce * params.avoidance * strength);
+        this.applyForce(away);
       }
     }
   }
 
-  update(field, W, H) {
-    this.vx += this.ax; this.vy += this.ay;
-    this.ax = 0; this.ay = 0;
-    const sp = Math.hypot(this.vx, this.vy);
-    if (sp > this.maxSpeed) { this.vx = this.vx / sp * this.maxSpeed; this.vy = this.vy / sp * this.maxSpeed; }
-    this.x += this.vx; this.y += this.vy;
+  // Hard collision: if we ended up inside a wall, push out and bounce.
+  collide(field) {
+    if (field.sample(this.position.x, this.position.y) <= field.threshold) return;
 
-    // Hard collision: if inside a wall, eject along the gradient and bounce.
-    const T = field.threshold;
-    let f = field.sample(this.x, this.y);
-    if (f > T) {
-      let nx = 0, ny = 0;
-      for (let k = 0; k < 12 && f > T; k++) {
-        const g = field.gradient(this.x, this.y);
-        const m = Math.hypot(g.x, g.y);
-        if (m < 1e-7) break;
-        nx = -g.x / m; ny = -g.y / m; // outward normal
-        this.x += nx * 3; this.y += ny * 3;
-        f = field.sample(this.x, this.y);
-      }
-      const vn = this.vx * nx + this.vy * ny;
-      if (vn < 0) { this.vx -= 1.7 * vn * nx; this.vy -= 1.7 * vn * ny; }
+    let normal = createVector(0, 0); // points out of the wall
+    for (let tries = 0; tries < 12; tries += 1) {
+      let into = field.gradient(this.position.x, this.position.y);
+      if (into.mag() < 1e-7) break;
+      normal = into.mult(-1).normalize();
+      this.position.add(p5.Vector.mult(normal, 3));
+      if (field.sample(this.position.x, this.position.y) <= field.threshold) break;
     }
+    // Reflect the part of the velocity that points into the wall.
+    let speedIntoWall = this.velocity.dot(normal);
+    if (speedIntoWall < 0) {
+      this.velocity.sub(p5.Vector.mult(normal, 1.7 * speedIntoWall));
+    }
+  }
 
-    // Wrap around the screen edges.
-    const pad = this.size;
-    if (this.x < -pad) this.x = W + pad; else if (this.x > W + pad) this.x = -pad;
-    if (this.y < -pad) this.y = H + pad; else if (this.y > H + pad) this.y = -pad;
+  // Wrap around the screen edges.
+  borders(field) {
+    // field.w and field.h are the scene size (1920x1080), not the preview canvas size.
+    if (this.position.x < -this.radius) this.position.x = field.w + this.radius;
+    if (this.position.y < -this.radius) this.position.y = field.h + this.radius;
+    if (this.position.x > field.w + this.radius) this.position.x = -this.radius;
+    if (this.position.y > field.h + this.radius) this.position.y = -this.radius;
+  }
 
-    // Trail (skip points across a wrap so we don't draw streaks across the screen)
-    const last = this.trail[this.trail.length - 1];
-    if (last && Math.hypot(last[0] - this.x, last[1] - this.y) > 60) this.trail.length = 0;
-    this.trail.push([this.x, this.y]);
+  recordTrail() {
+    let last = this.trail[this.trail.length - 1];
+    // Don't draw a streak across the screen when wrapping around an edge.
+    if (last && p5.Vector.dist(last, this.position) > 60) this.trail = [];
+    this.trail.push(this.position.copy());
     if (this.trail.length > 18) this.trail.shift();
   }
 
-  draw(ctx) {
-    const n = this.trail.length;
-    ctx.lineCap = 'round';
-    for (let i = 1; i < n; i++) {
-      const a = i / n;
-      ctx.strokeStyle = `hsla(${this.hue},90%,70%,${a * 0.5})`;
-      ctx.lineWidth = 1 + a * 2.2;
-      ctx.beginPath();
-      ctx.moveTo(this.trail[i - 1][0], this.trail[i - 1][1]);
-      ctx.lineTo(this.trail[i][0], this.trail[i][1]);
-      ctx.stroke();
+  // ---- Drawing (g is the p5.Graphics we're rendering into, in HSB color mode) ----
+
+  display(g) {
+    // Fading tail
+    g.strokeCap(ROUND);
+    for (let i = 1; i < this.trail.length; i += 1) {
+      let t = i / this.trail.length;
+      g.stroke(this.hue, 60, 100, t * 0.5);
+      g.strokeWeight(1 + t * 2.2);
+      g.line(this.trail[i - 1].x, this.trail[i - 1].y, this.trail[i].x, this.trail[i].y);
     }
-    // Head: small triangle pointing along velocity
-    const th = Math.atan2(this.vy, this.vx);
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(th);
-    ctx.fillStyle = `hsl(${this.hue},95%,85%)`;
-    ctx.shadowColor = `hsl(${this.hue},100%,65%)`;
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.moveTo(this.size * 1.6, 0);
-    ctx.lineTo(-this.size, -this.size * 0.8);
-    ctx.lineTo(-this.size, this.size * 0.8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+
+    // Soft glow, then a triangle pointing the way we're heading
+    g.noStroke();
+    g.fill(this.hue, 80, 100, 0.12);
+    g.ellipse(this.position.x, this.position.y, this.radius * 6);
+    g.fill(this.hue, 20, 100);
+    g.push();
+    g.translate(this.position.x, this.position.y);
+    g.rotate(this.velocity.heading());
+    g.triangle(this.radius * 1.6, 0, -this.radius, -this.radius * 0.8, -this.radius, this.radius * 0.8);
+    g.pop();
   }
 }

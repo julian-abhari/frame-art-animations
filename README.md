@@ -52,7 +52,8 @@ legacy/           original standalone sketches, kept for reference
 - Copy `scenes/_template.js` to `scenes/<name>/scene.js`.
 - Add its `<script>` tag to `index.html`, above `exporter.js`.
 - Contract: a class with `update()` (one tick = 1/60 s), `draw(g)` into a 1920×1080 logical space, and `reset()`.
-- It must be deterministic (seeded RNG), or exports won't repeat.
+- Scenes are plain p5.js: `createVector`, `random`, `map`, `g.ellipse()`, etc. `g` is the `p5.Graphics` being rendered into.
+- It must be deterministic: call `randomSeed()` in `reset()`, or exports won't repeat.
 - Optional: `controls` (sliders) and `onPointer(x, y)`.
 
 ## Known limits

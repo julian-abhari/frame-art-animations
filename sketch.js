@@ -10,6 +10,7 @@ let exporting = false;
 let cancelExport = false;
 let exportPreview = null; // graphics shown on the TV while exporting
 let screenRect = { x: 0, y: 0, w: 1, h: 1 };
+let roomLayer;          // cached wall + floor
 
 function setup() {
   const stage = $('stage');
@@ -19,6 +20,7 @@ function setup() {
   frameRate(60);
   pg = createGraphics(1920, 1080);
   pg.pixelDensity(1);
+  makeRoom();
 
   $('prev').onclick = () => loadScene(sceneIdx - 1);
   $('next').onclick = () => loadScene(sceneIdx + 1);
@@ -52,6 +54,7 @@ function loadScene(i) {
 
 function windowResized() {
   resizeCanvas($('stage').clientWidth, $('stage').clientHeight);
+  makeRoom();
 }
 
 function draw() {
@@ -64,62 +67,78 @@ function draw() {
     scene.draw(pg);
     pg.pop();
   }
-  drawRoom();
+  image(roomLayer, 0, 0);
   drawTV(exporting && exportPreview ? exportPreview : pg);
 }
 
-function drawRoom() {
-  // Plaster wall with a soft light falloff
-  background('#cfc8bd');
-  const ctx = drawingContext;
-  const g = ctx.createRadialGradient(width / 2, height * 0.4, 50, width / 2, height * 0.4, Math.max(width, height) * 0.8);
-  g.addColorStop(0, 'rgba(255,250,240,0.55)');
-  g.addColorStop(1, 'rgba(60,50,40,0.35)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, width, height);
-  // Floor / baseboard
-  noStroke();
-  fill('#6b5a49'); rect(0, height * 0.93, width, height * 0.07);
-  fill('#efe9df'); rect(0, height * 0.92, width, height * 0.012);
+// Wall + floor, painted once into their own layer (rebuilt whenever the window resizes).
+function makeRoom() {
+  if (roomLayer) roomLayer.remove();
+  roomLayer = createGraphics(width, height);
+  roomLayer.pixelDensity(1);
+  roomLayer.noStroke();
+  // Wall: a bright patch of light fading to darker plaster, drawn as growing rings
+  let maxR = max(width, height) * 0.8;
+  roomLayer.background(color(95, 85, 72));
+  for (let r = maxR; r > 0; r -= 4) {
+    let t = r / maxR; // 1 at the edge, 0 in the middle
+    roomLayer.fill(lerpColor(color(250, 244, 232), color(120, 110, 98), pow(t, 0.8)));
+    roomLayer.ellipse(width / 2, height * 0.4, r * 2);
+  }
+  // Baseboard and floor
+  roomLayer.fill('#efe9df');
+  roomLayer.rect(0, height * 0.92, width, height * 0.012);
+  roomLayer.fill('#6b5a49');
+  roomLayer.rect(0, height * 0.932, width, height * 0.068);
 }
 
 function drawTV(src) {
-  // Fit a 16:9 screen plus frame into the room
-  const frameT = 0.018;      // frame thickness as fraction of screen width
-  const maxW = width * 0.86, maxH = height * 0.80;
-  let sw = maxW;
-  let sh = sw * 9 / 16;
-  if (sh + sw * frameT * 2 > maxH) { sh = maxH - sw * frameT * 2; sw = sh * 16 / 9; }
-  // recompute so the frame fits
-  const ft = sw * frameT;
-  const tvW = sw + ft * 2, tvH = sh + ft * 2;
-  const tx = (width - tvW) / 2, ty = (height * 0.92 - tvH) / 2 + height * 0.01;
-  screenRect = { x: tx + ft, y: ty + ft, w: sw, h: sh };
+  // Work out the biggest 16:9 screen that fits, with the frame around it
+  let frameFraction = 0.018; // frame thickness as a fraction of screen width
+  let screenW = width * 0.86;
+  let screenH = (screenW * 9) / 16;
+  let maxH = height * 0.8;
+  if (screenH + screenW * frameFraction * 2 > maxH) {
+    screenH = maxH - screenW * frameFraction * 2;
+    screenW = (screenH * 16) / 9;
+  }
+  let frameT = screenW * frameFraction;
+  let tvW = screenW + frameT * 2;
+  let tvH = screenH + frameT * 2;
+  let tvX = (width - tvW) / 2;
+  let tvY = (height * 0.92 - tvH) / 2 + height * 0.01;
+  screenRect = { x: tvX + frameT, y: tvY + frameT, w: screenW, h: screenH };
 
-  const ctx = drawingContext;
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 18;
-  fill('#1c1815'); noStroke();
-  rect(tx, ty, tvW, tvH, 3);
-  ctx.restore();
-  // Frame bevel (walnut-ish) and inner black bezel
-  fill('#3b2c22'); rect(tx, ty, tvW, tvH, 3);
-  fill('#241a14'); rect(tx + ft * 0.15, ty + ft * 0.15, tvW - ft * 0.3, tvH - ft * 0.3, 2);
-  fill('#0a0a0a'); rect(tx + ft * 0.7, ty + ft * 0.7, tvW - ft * 1.4, tvH - ft * 1.4);
-  // Screen
+  noStroke();
+  // Drop shadow: a stack of faint, growing rectangles
+  for (let i = 18; i > 0; i -= 1) {
+    fill(0, 0, 0, 5);
+    rect(tvX - i * 1.5, tvY - i * 0.5 + 14, tvW + i * 3, tvH + i * 3, 6);
+  }
+  // Wood frame, darker inner edge, black bezel
+  fill('#3b2c22');
+  rect(tvX, tvY, tvW, tvH, 3);
+  fill('#241a14');
+  rect(tvX + frameT * 0.15, tvY + frameT * 0.15, tvW - frameT * 0.3, tvH - frameT * 0.3, 2);
+  fill('#0a0a0a');
+  rect(tvX + frameT * 0.7, tvY + frameT * 0.7, tvW - frameT * 1.4, tvH - frameT * 1.4);
+
+  // The screen itself
   image(src, screenRect.x, screenRect.y, screenRect.w, screenRect.h);
-  // Subtle glass glare
-  const glare = ctx.createLinearGradient(screenRect.x, screenRect.y, screenRect.x + screenRect.w, screenRect.y + screenRect.h);
-  glare.addColorStop(0, 'rgba(255,255,255,0.06)');
-  glare.addColorStop(0.4, 'rgba(255,255,255,0)');
-  ctx.fillStyle = glare;
-  ctx.fillRect(screenRect.x, screenRect.y, screenRect.w, screenRect.h);
+
+  // A little glass glare in the top-left corner
+  fill(255, 255, 255, 5);
+  triangle(screenRect.x, screenRect.y,
+           screenRect.x + screenRect.w * 0.45, screenRect.y,
+           screenRect.x, screenRect.y + screenRect.h * 0.8);
 
   if (exporting) {
-    noStroke(); fill(0, 150);
+    fill(0, 150);
     rect(screenRect.x, screenRect.y, screenRect.w, 28);
-    fill(255); textSize(14); textAlign(LEFT, CENTER);
-    text('Exporting… ' + ($('status').textContent), screenRect.x + 10, screenRect.y + 14);
+    fill(255);
+    textSize(14);
+    textAlign(LEFT, CENTER);
+    text('Exporting… ' + $('status').textContent, screenRect.x + 10, screenRect.y + 14);
   }
 }
 

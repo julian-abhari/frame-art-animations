@@ -1,77 +1,92 @@
 // Scene 1: flocking boids swimming through an animated marching-squares landscape.
-// Boids steer around the glowing contour walls and bounce off them if they touch.
-(function () {
-  const W = 1920, H = 1080;
-
-  function mulberry32(a) {
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+// The boids steer around the glowing contour walls and bounce off if they touch.
+//
+// Every scene is drawn in a fixed 1920x1080 space. The driver scales it for 1080p/4K export.
+class FlockingMarchingScene {
+  constructor() {
+    this.seed = 20240607;
+    this.params = { separation: 1.6, alignment: 1.0, cohesion: 1.0, avoidance: 2.5 };
+    this.vignette = this.makeVignette();
+    this.reset();
   }
 
-  class FlockingMarchingScene {
-    constructor() {
-      this.seed = 20240607;
-      this.params = { separation: 1.6, alignment: 1.0, cohesion: 1.0, avoidance: 2.5 };
-      this.reset();
+  // Start over from the beginning. Seeded so every run (and every export) is identical.
+  reset() {
+    randomSeed(this.seed);
+    this.zOffset = 0;
+    this.field = new TerrainField(1920, 1080, 20, this.seed, 0.2);
+    this.field.update(this.zOffset);
+    this.flock = [];
+    for (let i = 0; i < 220; i += 1) {
+      this.addBoid(random(1920), random(1080));
+    }
+  }
+
+  // Add a boid at (x, y), or somewhere open nearby if (x, y) is inside a wall.
+  addBoid(x, y) {
+    for (let tries = 0; tries < 200; tries += 1) {
+      if (this.field.sample(x, y) < this.field.threshold - 0.1) {
+        this.flock.push(new Boid(x, y));
+        return;
+      }
+      x = random(1920);
+      y = random(1080);
+    }
+  }
+
+  // One simulation tick (the driver runs 60 of these per second).
+  update() {
+    this.zOffset += 0.0035;
+    this.field.update(this.zOffset);
+    for (let boid of this.flock) {
+      boid.run(this.flock, this.field, this.params);
+    }
+  }
+
+  // g is a p5.Graphics already scaled to the 1920x1080 space.
+  draw(g) {
+    g.colorMode(RGB, 255);
+    this.field.draw(g);
+
+    g.colorMode(HSB, 360, 100, 100, 1);
+    for (let boid of this.flock) {
+      boid.display(g);
     }
 
-    reset() {
-      this.rand = mulberry32(this.seed);
-      this.t = 0;
-      this.field = new TerrainField(W, H, 20, this.seed, 0.2);
-      this.field.update(this.t);
-      this.boids = [];
-      for (let i = 0; i < 220; i++) this.addBoidInOpenSpace();
-    }
+    g.image(this.vignette, 0, 0, 1920, 1080);
+  }
 
-    addBoidInOpenSpace(x, y) {
-      for (let tries = 0; tries < 200; tries++) {
-        const px = x !== undefined ? x : this.rand() * W;
-        const py = y !== undefined ? y : this.rand() * H;
-        if (this.field.sample(px, py) < this.field.threshold - 0.1) {
-          this.boids.push(new Boid(px, py, this.rand));
-          return;
-        }
-        x = y = undefined; // fall back to random placement
+  // Click/drag on the preview TV adds boids (driver passes scene coordinates).
+  onPointer(x, y) {
+    this.addBoid(x, y);
+  }
+
+  // Dark edges, painted once into a small image.
+  makeVignette() {
+    let img = createImage(192, 108);
+    img.loadPixels();
+    for (let y = 0; y < img.height; y += 1) {
+      for (let x = 0; x < img.width; x += 1) {
+        let d = dist(x, y, img.width / 2, img.height / 2) / (img.height / 2);
+        let p = 4 * (y * img.width + x);
+        img.pixels[p] = 0;
+        img.pixels[p + 1] = 0;
+        img.pixels[p + 2] = 0;
+        img.pixels[p + 3] = constrain(map(d, 0.45, 1.0, 0, 115), 0, 115);
       }
     }
-
-    // One simulation tick (defined at 60 ticks/second).
-    update() {
-      this.t += 0.0035;
-      this.field.update(this.t);
-      for (const b of this.boids) b.run(this.boids, this.field, this.params, W, H);
-    }
-
-    // Draw into a p5.Graphics that is already scaled to the 1920x1080 logical space.
-    draw(g) {
-      this.field.draw(g);
-      const ctx = g.drawingContext;
-      for (const b of this.boids) b.draw(ctx);
-      // Soft vignette
-      const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 1.0);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.45)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
-    }
-
-    // Click/drag in the preview to add boids (logical coordinates).
-    onPointer(x, y) { this.addBoidInOpenSpace(x, y); }
+    img.updatePixels();
+    return img;
   }
+}
 
-  SCENES.push({
-    name: 'Flocking Boids in Marching Squares',
-    create: () => new FlockingMarchingScene(),
-    controls: [
-      { key: 'separation', label: 'Separation', min: 0, max: 3, step: 0.1 },
-      { key: 'alignment', label: 'Alignment', min: 0, max: 3, step: 0.1 },
-      { key: 'cohesion', label: 'Cohesion', min: 0, max: 3, step: 0.1 },
-      { key: 'avoidance', label: 'Wall avoidance', min: 0, max: 5, step: 0.1 },
-    ],
-  });
-})();
+SCENES.push({
+  name: 'Flocking Boids in Marching Squares',
+  create: () => new FlockingMarchingScene(),
+  controls: [
+    { key: 'separation', label: 'Separation', min: 0, max: 3, step: 0.1 },
+    { key: 'alignment', label: 'Alignment', min: 0, max: 3, step: 0.1 },
+    { key: 'cohesion', label: 'Cohesion', min: 0, max: 3, step: 0.1 },
+    { key: 'avoidance', label: 'Wall avoidance', min: 0, max: 5, step: 0.1 },
+  ],
+});
