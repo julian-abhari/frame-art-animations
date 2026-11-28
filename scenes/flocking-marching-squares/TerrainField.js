@@ -1,6 +1,6 @@
 // TerrainField: the reef.
 //
-// The original marching-squares sketch: a grid of animated noise values. Every cell is
+// The original marching-squares sketch: a grid of noise values. Every cell is
 // shaded by its value, and marching squares draws a line where the field crosses the
 // threshold. Values above `threshold` are solid reef that the fish can't enter. The
 // contour line and the solid shape it encloses are used three ways: they are drawn as the
@@ -20,6 +20,7 @@ class TerrainField {
     this.noise = new OpenSimplexNoise(seed);
 
     this.reefEdges = []; // Boundary segments along the reef edge, rebuilt every update
+    this.needsPainting = true; // the small images are repainted only when the field changes
 
     // One image pixel per cell, stretched up (without smoothing) so cells stay blocky.
     // Water and reef are separate images so the sunbeams can be drawn in between:
@@ -29,7 +30,9 @@ class TerrainField {
     this.reefImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
   }
 
-  // Recompute every grid corner for time `zOffset` (this is what makes the reef drift).
+  // Fill the grid from one slice of the noise. `zOffset` picks the slice (the third noise
+  // coordinate), so each number gives a different reef. The scene calls this once, so the reef
+  // never moves.
   update(zOffset) {
     for (let j = 0; j < this.rows; j += 1) {
       for (let i = 0; i < this.columns; i += 1) {
@@ -37,6 +40,7 @@ class TerrainField {
       }
     }
     this.reefEdges = this.contourSegments(this.threshold);
+    this.needsPainting = true;
   }
 
   // Field value at any pixel position (bilinear blend of the 4 surrounding corners).
@@ -135,7 +139,10 @@ class TerrainField {
   // The scene calls these in order: drawWater, (sunbeams), drawReef.
 
   drawWater(g) {
-    this.paintImages();
+    if (this.needsPainting) {
+      this.paintImages();
+      this.needsPainting = false;
+    }
     g.noSmooth(); // keep the blocky cells crisp when the small image is stretched
     g.image(this.waterImage, 0, 0, this.w, this.h);
     g.smooth();

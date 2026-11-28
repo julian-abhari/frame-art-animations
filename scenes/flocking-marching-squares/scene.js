@@ -1,6 +1,6 @@
 // Scene 1: a school of fish in a deep-navy reef. Black, white and navy.
 //
-// - The reef is a drifting noise field drawn with marching squares (TerrainField.js).
+// - The reef is a fixed noise field drawn with marching squares (TerrainField.js).
 // - The fish flock (boids) and bounce off the reef edge (Boid.js).
 // - Each fish is a thin inverse-kinematics spine that flows with a noise field (Fish.js).
 // - Fish give off bubbles that float up and fade (Vapor.js).
@@ -8,6 +8,9 @@
 //   They are drawn between the water and the reef, so they never show inside it.
 //
 // Every scene is drawn in a fixed 1920x1080 space. The driver scales it for 1080p/4K export.
+// Which slice of the noise the reef is built from. Try other numbers for other layouts.
+const REEF_LAYOUT = 2.5;
+
 class FlockingMarchingScene {
   constructor() {
     this.seed = 20240607;
@@ -20,11 +23,12 @@ class FlockingMarchingScene {
   reset() {
     randomSeed(this.seed);
     noiseSeed(this.seed);
-    this.time = 0;     // seconds
-    this.zOffset = 0;  // how far through the noise the reef has drifted
+    this.time = 0; // seconds
 
+    // The reef never moves: it's built once from one fixed slice of the noise.
+    // (Change REEF_LAYOUT to get a different reef.)
     this.field = new TerrainField(1920, 1080, 15, this.seed, 0.3);
-    this.field.update(this.zOffset);
+    this.field.update(REEF_LAYOUT);
 
     this.school = [];
     for (let i = 0; i < 200; i += 1) {
@@ -50,9 +54,7 @@ class FlockingMarchingScene {
   // One simulation tick (the driver runs 60 of these per second).
   update() {
     this.time += 1 / 60;
-    this.zOffset += 0.0035;
 
-    this.field.update(this.zOffset);
     for (let fish of this.school) {
       fish.run(this.school, this.field, this.params, this.time);
       // Now and then a fish lets out a bubble
