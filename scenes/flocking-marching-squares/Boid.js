@@ -1,14 +1,15 @@
 // A boid: flocks with its neighbors and reacts to the TerrainField walls.
+// This class is only behavior (movement). Fish extends it to add a body to draw.
 class Boid {
   constructor(x, y) {
     this.position = createVector(x, y);
     this.velocity = p5.Vector.random2D().mult(1.5);
     this.acceleration = createVector(0, 0);
-    this.radius = 4.5;
-    this.maxSpeed = 3.4;
-    this.maxForce = 0.16;
-    this.hue = random(175, 225); // teal to blue (drawn in HSB)
-    this.trail = [];             // recent positions, drawn as a fading tail
+    this.radius = 6;
+    this.maxSpeed = 2.8;
+    this.maxForce = 0.12;
+    this.neighborDistance = 90;     // how far a boid can see other boids
+    this.desiredSeparation = 34;    // personal space
   }
 
   run(boids, field, params) {
@@ -17,7 +18,6 @@ class Boid {
     this.update();
     this.collide(field);
     this.borders(field);
-    this.recordTrail();
   }
 
   applyForce(force) {
@@ -50,7 +50,7 @@ class Boid {
 
   // Measure distance to every other boid once, keep the ones that are close.
   findNeighbors(boids) {
-    let neighborDistance = 60;
+    let neighborDistance = this.neighborDistance;
     let neighbors = [];
     for (let other of boids) {
       let distance = dist(this.position.x, this.position.y, other.position.x, other.position.y);
@@ -63,7 +63,7 @@ class Boid {
 
   // Steer away from boids that are too close.
   separate(neighbors) {
-    let desiredSeparation = 28;
+    let desiredSeparation = this.desiredSeparation;
     let separateForce = createVector(0, 0);
     let count = 0;
     for (let n of neighbors) {
@@ -142,8 +142,8 @@ class Boid {
     let normal = createVector(0, 0); // points out of the wall
     for (let tries = 0; tries < 12; tries += 1) {
       let into = field.gradient(this.position.x, this.position.y);
-      if (into.mag() < 1e-7) break;
-      normal = into.mult(-1).normalize();
+      // Flat gradient (e.g. at the very edge of the field): just head for the surface
+      normal = into.mag() < 1e-7 ? createVector(0, -1) : into.mult(-1).normalize();
       this.position.add(p5.Vector.mult(normal, 3));
       if (field.sample(this.position.x, this.position.y) <= field.threshold) break;
     }
@@ -154,44 +154,26 @@ class Boid {
     }
   }
 
-  // Wrap around the screen edges.
+  // Wrap around the screen edges, but only where the other side is open water.
+  // If the reef is on the other side (like the sea floor), bounce back instead.
   borders(field) {
     // field.w and field.h are the scene size (1920x1080), not the preview canvas size.
-    if (this.position.x < -this.radius) this.position.x = field.w + this.radius;
-    if (this.position.y < -this.radius) this.position.y = field.h + this.radius;
-    if (this.position.x > field.w + this.radius) this.position.x = -this.radius;
-    if (this.position.y > field.h + this.radius) this.position.y = -this.radius;
-  }
+    let r = this.radius;
+    let x = this.position.x;
+    let y = this.position.y;
+    let wrappedX = x < -r ? field.w + r : (x > field.w + r ? -r : x);
+    let wrappedY = y < -r ? field.h + r : (y > field.h + r ? -r : y);
 
-  recordTrail() {
-    let last = this.trail[this.trail.length - 1];
-    // Don't draw a streak across the screen when wrapping around an edge.
-    if (last && p5.Vector.dist(last, this.position) > 60) this.trail = [];
-    this.trail.push(this.position.copy());
-    if (this.trail.length > 18) this.trail.shift();
-  }
-
-  // ---- Drawing (g is the p5.Graphics we're rendering into, in HSB color mode) ----
-
-  display(g) {
-    // Fading tail
-    g.strokeCap(ROUND);
-    for (let i = 1; i < this.trail.length; i += 1) {
-      let t = i / this.trail.length;
-      g.stroke(this.hue, 60, 100, t * 0.5);
-      g.strokeWeight(1 + t * 2.2);
-      g.line(this.trail[i - 1].x, this.trail[i - 1].y, this.trail[i].x, this.trail[i].y);
+    let openWater = field.threshold - 0.1;
+    if (wrappedX !== x) {
+      if (field.sample(wrappedX, y) < openWater) this.position.x = wrappedX;
+      else this.velocity.x *= -1;
     }
-
-    // Soft glow, then a triangle pointing the way we're heading
-    g.noStroke();
-    g.fill(this.hue, 80, 100, 0.12);
-    g.ellipse(this.position.x, this.position.y, this.radius * 6);
-    g.fill(this.hue, 20, 100);
-    g.push();
-    g.translate(this.position.x, this.position.y);
-    g.rotate(this.velocity.heading());
-    g.triangle(this.radius * 1.6, 0, -this.radius, -this.radius * 0.8, -this.radius, this.radius * 0.8);
-    g.pop();
+    if (wrappedY !== y) {
+      if (field.sample(x, wrappedY) < openWater) this.position.y = wrappedY;
+      else this.velocity.y *= -1;
+    }
+    this.position.x = constrain(this.position.x, -r - 1, field.w + r + 1);
+    this.position.y = constrain(this.position.y, -r - 1, field.h + r + 1);
   }
 }

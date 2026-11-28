@@ -14,10 +14,14 @@ Generative p5.js art scenes built for a Samsung Frame TV. Scenes render inside a
 
 | # | Scene | Status |
 |---|-------|--------|
-| 1 | Flocking Boids in Marching Squares | MVP done |
+| 1 | Coral Reef | Done |
 | 2–4 | TBD | Not started |
 
-**Scene 1:** boids flock (separation, alignment, cohesion) through an animated OpenSimplex noise field. A marching-squares pass draws the glowing contour wall. Boids look ahead and steer around the walls, and bounce off them if they touch.
+**Scene 1, Coral Reef:** five schools of fish swim through a drifting coral reef.
+- **Marching squares** draws the reef. A noise field is turned into the coral outline, and the fish steer around it and bounce off if they touch it.
+- **Flocking** (separation, alignment, cohesion) moves the fish.
+- **Inverse kinematics** (from the old Multi Inverse Kinematics sketch) gives each fish a spine that trails its head, so bodies bend through turns. The same chains make the swaying kelp.
+- **Raycasting** (from the old Raycasting sketch) makes the sunbeams. Rays are fired from above the screen and stop at the reef edge, so the coral casts shadows.
 
 ## Exporting
 
@@ -42,10 +46,16 @@ index.html        page, toolbar, script tags (register new scenes here)
 sketch.js         driver: room + Frame TV, scene switching, export UI
 exporter.js       offline MP4 export (WebCodecs + mp4-muxer)
 scenes/
-  flocking-marching-squares/   Scene 1 (Boid, TerrainField, scene.js)
+  flocking-marching-squares/   Scene 1
+    scene.js                   puts it all together (start here)
+    TerrainField.js            noise field + marching squares (the reef)
+    Boid.js, Fish.js           flocking behavior, and the fish body
+    InverseKinematics.js       Segment and Chain
+    Kelp.js, Bubble.js         scenery
+    Raycasting.js, SunBeams.js Ray/Boundary/LightSource, and the beams
   _template.js                 starting point for new scenes
 libraries/        p5.js 0.9.0, OpenSimplexNoise, mp4-muxer
-legacy/           original standalone sketches, kept for reference
+legacy/           original standalone sketches (flocking, raycasting, inverse kinematics), kept for reference
 ```
 
 ## Adding a scene

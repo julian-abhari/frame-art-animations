@@ -1,5 +1,10 @@
-// TerrainField: an animated noise field drawn with marching squares.
-// Field values above `threshold` are "solid" walls that the boids can't enter.
+// TerrainField: the coral reef.
+//
+// An animated noise field, drawn with marching squares. Field values above `threshold`
+// are solid coral that the fish can't enter. The edge of the coral is the contour line
+// where the field equals the threshold. Marching squares finds that line, and we use
+// the line segments three ways: to draw the coral edge, to block the fish, and as the
+// walls that stop the sunbeams (see Raycasting.js).
 class TerrainField {
   constructor(w, h, resolution, seed, threshold) {
     this.w = w;
@@ -14,12 +19,14 @@ class TerrainField {
     this.noiseBig = new OpenSimplexNoise(seed);
     this.noiseSmall = new OpenSimplexNoise(seed + 1013);
 
-    // The smooth colored terrain is painted into a small image, then stretched to full size.
+    this.reefEdges = []; // Boundary segments along the coral edge, rebuilt every update
+
+    // The water and coral colors are painted into a small image, then stretched to full size.
     this.imageScale = 10; // 1 image pixel = 10x10 scene pixels (keeps painting fast)
     this.terrainImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
   }
 
-  // Recompute every grid corner for time `zOffset` (this is what makes the walls drift).
+  // Recompute every grid corner for time `zOffset` (this is what makes the reef drift).
   update(zOffset) {
     for (let j = 0; j < this.rows; j += 1) {
       for (let i = 0; i < this.columns; i += 1) {
@@ -27,9 +34,12 @@ class TerrainField {
         let y = j * this.resolution;
         let big = this.noiseBig.noise3D(x * 0.0019, y * 0.0019, zOffset);
         let small = this.noiseSmall.noise3D(x * 0.0046, y * 0.0046, zOffset * 1.4);
-        this.values[j * this.columns + i] = big * 0.72 + small * 0.28;
+        // Push the field up near the bottom of the screen so the reef rises from a sea floor.
+        let seaFloor = pow(constrain(map(y, this.h * 0.68, this.h, 0, 1), 0, 1), 1.5) * 1.1;
+        this.values[j * this.columns + i] = big * 0.72 + small * 0.28 + seaFloor;
       }
     }
+    this.reefEdges = this.contourSegments(this.threshold);
   }
 
   // Field value at any pixel position (bilinear blend of the 4 surrounding corners).
@@ -44,7 +54,7 @@ class TerrainField {
     return lerp(top, bottom, fy - j);
   }
 
-  // Direction the field increases fastest (i.e. pointing into a wall).
+  // Direction the field increases fastest (i.e. pointing into the coral).
   gradient(x, y) {
     let e = this.resolution * 0.5;
     return createVector(
@@ -53,57 +63,75 @@ class TerrainField {
     );
   }
 
-  // ---- Drawing ----
+  // ---- Marching squares ----
+
+  // Look at each cell's 4 corners, pick the matching line pattern, and collect the
+  // line segments (as Boundary objects) for one iso-level.
+  contourSegments(level) {
+    let segments = [];
+    for (let i = 0; i < this.columns - 1; i += 1) {
+      for (let j = 0; j < this.rows - 1; j += 1) {
+        let k = j * this.columns + i;
+        let tl = this.values[k];
+        let tr = this.values[k + 1];
+        let bl = this.values[k + this.columns];
+        let br = this.values[k + this.columns + 1];
+        let state = getState(tl > level, tr > level, br > level, bl > level);
+        if (state === 0 || state === 15) continue; // cell is all water or all coral
+
+        // a = top edge, b = right edge, c = bottom edge, d = left edge.
+        // The point on each edge slides to where the field actually crosses `level`.
+        let x = i * this.resolution;
+        let y = j * this.resolution;
+        let r = this.resolution;
+        let a = createVector(x + r * inverseLerp(tl, tr, level), y);
+        let b = createVector(x + r, y + r * inverseLerp(tr, br, level));
+        let c = createVector(x + r * inverseLerp(bl, br, level), y + r);
+        let d = createVector(x, y + r * inverseLerp(tl, bl, level));
+        for (let pair of linesForState(state, a, b, c, d)) {
+          segments.push(new Boundary(pair[0].x, pair[0].y, pair[1].x, pair[1].y));
+        }
+      }
+    }
+    return segments;
+  }
+
+  // ---- Drawing (g is in RGB color mode) ----
 
   draw(g) {
     this.paintTerrain();
     g.image(this.terrainImage, 0, 0, this.w, this.h);
-
-    g.noFill();
-    g.strokeCap(ROUND);
-    let T = this.threshold;
-
-    // Faint topographic rings around the walls
-    g.strokeWeight(1.5);
-    g.stroke(120, 150, 255, 26);
-    this.drawContour(g, T - 0.16);
-    this.drawContour(g, T - 0.32);
-    g.stroke(255, 170, 120, 30);
-    this.drawContour(g, T + 0.18);
-    this.drawContour(g, T + 0.36);
-
-    // The wall edge: wide soft glow, medium glow, bright core
-    g.strokeWeight(14);
-    g.stroke(255, 150, 70, 40);
-    this.drawContour(g, T);
-    g.strokeWeight(6);
-    g.stroke(255, 190, 110, 76);
-    this.drawContour(g, T);
-    g.strokeWeight(2.2);
-    g.stroke(255, 236, 190, 240);
-    this.drawContour(g, T);
+    this.drawCoralEdge(g);
   }
 
-  // Fill the small image: dark glowing "air" below the threshold, purple "rock" above it.
+  // Fill the small image: water that gets darker with depth, and coral that is
+  // bright pink-orange at its edge and fades to deep purple inside.
   paintTerrain() {
     let img = this.terrainImage;
     let T = this.threshold;
     img.loadPixels();
     for (let py = 0; py < img.height; py += 1) {
+      let depth = py / img.height; // 0 at the surface, 1 at the bottom
       for (let px = 0; px < img.width; px += 1) {
         let f = this.sample((px + 0.5) * this.imageScale, (py + 0.5) * this.imageScale);
         let r, g, b;
         if (f > T) {
-          let t = constrain(map(f, T, T + 0.55, 0, 1), 0, 1);
-          r = lerp(46, 166, t);
-          g = lerp(18, 44, t);
-          b = lerp(96, 136, t);
+          // Coral: blend through three colors as we go deeper into the rock
+          let t = constrain(map(f, T, T + 0.6, 0, 1), 0, 1);
+          if (t < 0.25) {
+            let u = t / 0.25;
+            r = lerp(236, 170, u); g = lerp(104, 60, u); b = lerp(98, 110, u);
+          } else {
+            let u = (t - 0.25) / 0.75;
+            r = lerp(170, 40, u); g = lerp(60, 18, u); b = lerp(110, 62, u);
+          }
         } else {
-          let depth = constrain(T - f, 0, 1);
-          let glow = exp(-(T - f) * 7) * 38;
-          r = 12 - depth * 5 + glow * 0.9;
-          g = 18 - depth * 6 + glow * 0.35;
-          b = 46 - depth * 16 + glow * 0.8;
+          // Water: bright turquoise at the top, deep blue at the bottom,
+          // with a faint glow near the coral
+          let glow = exp(-(T - f) * 6) * 22;
+          r = lerp(34, 3, pow(depth, 0.7)) + glow * 0.4;
+          g = lerp(138, 24, pow(depth, 0.7)) + glow * 0.5;
+          b = lerp(176, 58, pow(depth, 0.7)) + glow * 0.6;
         }
         let p = 4 * (py * img.width + px);
         img.pixels[p] = r;
@@ -115,29 +143,36 @@ class TerrainField {
     img.updatePixels();
   }
 
-  // Marching squares for one iso-level: look at each cell's 4 corners, pick the
-  // matching line pattern, and draw it with the end points slid along each edge.
-  drawContour(g, level) {
-    for (let i = 0; i < this.columns - 1; i += 1) {
-      for (let j = 0; j < this.rows - 1; j += 1) {
-        let k = j * this.columns + i;
-        let tl = this.values[k];
-        let tr = this.values[k + 1];
-        let bl = this.values[k + this.columns];
-        let br = this.values[k + this.columns + 1];
-        let state = getState(tl > level, tr > level, br > level, bl > level);
-        if (state === 0 || state === 15) continue;
+  // A bright rim along the edge, with little coral fingers and polyps growing outward.
+  drawCoralEdge(g) {
+    let polypColors = [[255, 140, 120], [255, 185, 110], [240, 110, 170], [255, 225, 175]];
 
-        // a = top edge, b = right edge, c = bottom edge, d = left edge
-        let x = i * this.resolution;
-        let y = j * this.resolution;
-        let r = this.resolution;
-        let a = createVector(x + r * inverseLerp(tl, tr, level), y);
-        let b = createVector(x + r, y + r * inverseLerp(tr, br, level));
-        let c = createVector(x + r * inverseLerp(bl, br, level), y + r);
-        let d = createVector(x, y + r * inverseLerp(tl, bl, level));
-        drawState(g, state, a, b, c, d);
-      }
+    g.strokeCap(ROUND);
+    g.strokeWeight(3);
+    g.stroke(255, 170, 140, 210);
+    for (let edge of this.reefEdges) {
+      g.line(edge.pointA.x, edge.pointA.y, edge.pointB.x, edge.pointB.y);
+    }
+
+    for (let edge of this.reefEdges) {
+      let mid = p5.Vector.lerp(edge.pointA, edge.pointB, 0.5);
+      // The gradient points into the coral, so growth goes the opposite way
+      let outward = this.gradient(mid.x, mid.y).mult(-1);
+      if (outward.mag() < 1e-7) continue;
+      outward.normalize();
+
+      // Low-frequency noise gives each patch of coral its own color and finger length
+      let n = noise(mid.x * 0.02, mid.y * 0.02);
+      let fingerLength = map(n, 0, 1, 3, 17);
+      let tip = p5.Vector.add(mid, p5.Vector.mult(outward, fingerLength));
+      let c = polypColors[floor(n * 3.99)];
+
+      g.stroke(c[0], c[1], c[2], 190);
+      g.strokeWeight(2);
+      g.line(mid.x, mid.y, tip.x, tip.y);
+      g.noStroke();
+      g.fill(c[0], c[1], c[2]);
+      g.ellipse(tip.x, tip.y, map(n, 0, 1, 3, 7));
     }
   }
 }
@@ -152,37 +187,26 @@ function getState(a, b, c, d) {
   return a * 8 + b * 4 + c * 2 + d * 1;
 }
 
-function drawState(g, state, a, b, c, d) {
+// Which lines does a cell with this state contain? Returns a list of [point, point] pairs.
+function linesForState(state, a, b, c, d) {
   switch (state) {
     case 1: case 14:
-      quickLine(g, c, d);
-      break;
+      return [[c, d]];
     case 2: case 13:
-      quickLine(g, b, c);
-      break;
+      return [[b, c]];
     case 3: case 12:
-      quickLine(g, b, d);
-      break;
+      return [[b, d]];
     case 4: case 11:
-      quickLine(g, a, b);
-      break;
+      return [[a, b]];
     case 5:
-      quickLine(g, b, c);
-      quickLine(g, a, d);
-      break;
+      return [[b, c], [a, d]];
     case 6: case 9:
-      quickLine(g, a, c);
-      break;
+      return [[a, c]];
     case 7: case 8:
-      quickLine(g, a, d);
-      break;
+      return [[a, d]];
     case 10:
-      quickLine(g, a, b);
-      quickLine(g, c, d);
-      break;
+      return [[a, b], [c, d]];
+    default:
+      return [];
   }
-}
-
-function quickLine(g, a, b) {
-  g.line(a.x, a.y, b.x, b.y);
 }
