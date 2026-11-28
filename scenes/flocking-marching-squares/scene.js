@@ -5,6 +5,7 @@
 // - Each fish is a thin inverse-kinematics spine that flows with a noise field (Fish.js).
 // - Fish give off bubbles that float up and fade (Vapor.js).
 // - Sunbeams are raycast from above and stop at the reef (SunBeams.js, Raycasting.js).
+//   They are drawn between the water and the reef, so they never show inside it.
 //
 // Every scene is drawn in a fixed 1920x1080 space. The driver scales it for 1080p/4K export.
 class FlockingMarchingScene {
@@ -22,7 +23,7 @@ class FlockingMarchingScene {
     this.time = 0;     // seconds
     this.zOffset = 0;  // how far through the noise the reef has drifted
 
-    this.field = new TerrainField(1920, 1080, 15, this.seed, 0.05);
+    this.field = new TerrainField(1920, 1080, 15, this.seed, 0.3);
     this.field.update(this.zOffset);
 
     this.school = [];
@@ -73,7 +74,9 @@ class FlockingMarchingScene {
   // Drawing order is back to front.
   draw(g) {
     g.colorMode(RGB, 255);
-    this.field.draw(g); // the reef: blocky navy cells and white edge lines
+    this.field.drawWater(g);   // ocean
+    this.sunBeams.display(g);  // light shines on the water...
+    this.field.drawReef(g);    // ...and the reef sits in front of it, so light never shows inside it
 
     for (let fish of this.school) {
       fish.display(g);
@@ -81,7 +84,6 @@ class FlockingMarchingScene {
     for (let vapor of this.vapors) {
       vapor.display(g);
     }
-    this.sunBeams.display(g);
     g.image(this.vignette, 0, 0, 1920, 1080);
   }
 
@@ -101,7 +103,7 @@ class FlockingMarchingScene {
         img.pixels[p] = 0;
         img.pixels[p + 1] = 0;
         img.pixels[p + 2] = 6;
-        img.pixels[p + 3] = constrain(map(d, 0.5, 1.1, 0, 150), 0, 150);
+        img.pixels[p + 3] = constrain(map(d, 0.5, 1.1, 0, 110), 0, 110);
       }
     }
     img.updatePixels();

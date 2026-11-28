@@ -15,6 +15,7 @@ class Boid {
   run(boids, field, params) {
     this.flock(boids, params);
     this.avoidWalls(field, params);
+    this.avoidEdges(field, params);
     this.update();
     this.collide(field);
     this.borders(field);
@@ -135,18 +136,15 @@ class Boid {
     }
   }
 
-  // Hard collision: if we ended up inside a wall, push out and bounce.
+  // Hard collision: if we ended up inside a wall, move to the nearest open water and bounce.
   collide(field) {
     if (field.sample(this.position.x, this.position.y) <= field.threshold) return;
 
-    let normal = createVector(0, 0); // points out of the wall
-    for (let tries = 0; tries < 12; tries += 1) {
-      let into = field.gradient(this.position.x, this.position.y);
-      // Flat gradient (e.g. at the very edge of the field): just head for the surface
-      normal = into.mag() < 1e-7 ? createVector(0, -1) : into.mult(-1).normalize();
-      this.position.add(p5.Vector.mult(normal, 3));
-      if (field.sample(this.position.x, this.position.y) <= field.threshold) break;
-    }
+    let open = field.nearestOpenPoint(this.position.x, this.position.y);
+    if (open === null) return;
+
+    let normal = p5.Vector.sub(open, this.position).normalize(); // points out of the wall
+    this.position.set(open.x, open.y);
     // Reflect the part of the velocity that points into the wall.
     let speedIntoWall = this.velocity.dot(normal);
     if (speedIntoWall < 0) {
@@ -154,26 +152,22 @@ class Boid {
     }
   }
 
-  // Wrap around the screen edges, but only where the other side is open water.
-  // If the reef is on the other side (like the sea floor), bounce back instead.
+  // Turn away from the screen edges before reaching them (the further in, the harder the push).
+  avoidEdges(field, params) {
+    let margin = 90;
+    let push = createVector(0, 0);
+    push.x += constrain(map(this.position.x, 0, margin, 1, 0), 0, 1);
+    push.x -= constrain(map(this.position.x, field.w - margin, field.w, 0, 1), 0, 1);
+    push.y += constrain(map(this.position.y, 0, margin, 1, 0), 0, 1);
+    push.y -= constrain(map(this.position.y, field.h - margin, field.h, 0, 1), 0, 1);
+    push.mult(this.maxForce * params.avoidance);
+    this.applyForce(push);
+  }
+
+  // Safety net: never leave the screen.
   borders(field) {
     // field.w and field.h are the scene size (1920x1080), not the preview canvas size.
-    let r = this.radius;
-    let x = this.position.x;
-    let y = this.position.y;
-    let wrappedX = x < -r ? field.w + r : (x > field.w + r ? -r : x);
-    let wrappedY = y < -r ? field.h + r : (y > field.h + r ? -r : y);
-
-    let openWater = field.threshold - 0.1;
-    if (wrappedX !== x) {
-      if (field.sample(wrappedX, y) < openWater) this.position.x = wrappedX;
-      else this.velocity.x *= -1;
-    }
-    if (wrappedY !== y) {
-      if (field.sample(x, wrappedY) < openWater) this.position.y = wrappedY;
-      else this.velocity.y *= -1;
-    }
-    this.position.x = constrain(this.position.x, -r - 1, field.w + r + 1);
-    this.position.y = constrain(this.position.y, -r - 1, field.h + r + 1);
+    this.position.x = constrain(this.position.x, 0, field.w);
+    this.position.y = constrain(this.position.y, 0, field.h);
   }
 }

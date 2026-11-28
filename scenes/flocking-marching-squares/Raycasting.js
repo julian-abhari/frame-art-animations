@@ -68,8 +68,8 @@ class LightSource {
       }
       this.shafts.push({
         rays: rays,
-        offset: map(s, 0, shaftCount - 1, -0.13, 0.13) + random(-0.02, 0.02), // angle from the light's center
-        width: random(0.035, 0.08),   // angle between a shaft's first and last ray
+        offset: map(s, 0, shaftCount - 1, -0.14, 0.14) + random(-0.012, 0.012), // angle from the light's center
+        width: random(0.02, 0.06),   // angle between a shaft's first and last ray
         flicker: random(1000),        // noise seed for this shaft's shimmer
         brightness: 1,
         hits: [],                     // filled in by look()

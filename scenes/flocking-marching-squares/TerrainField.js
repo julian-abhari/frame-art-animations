@@ -21,8 +21,11 @@ class TerrainField {
     this.reefEdges = []; // Boundary segments along the reef edge, rebuilt every update
 
     // One image pixel per cell, stretched up (without smoothing) so cells stay blocky.
+    // Water and reef are separate images so the sunbeams can be drawn in between:
+    // the reef is opaque, so light can never show up inside it.
     this.imageScale = resolution;
-    this.terrainImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
+    this.waterImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
+    this.reefImage = createImage(ceil(w / this.imageScale), ceil(h / this.imageScale));
   }
 
   // Recompute every grid corner for time `zOffset` (this is what makes the reef drift).
@@ -54,6 +57,22 @@ class TerrainField {
       this.sample(x + e, y) - this.sample(x - e, y),
       this.sample(x, y + e) - this.sample(x, y - e)
     );
+  }
+
+  // The closest spot to (x, y) that is clearly open water, found by searching in widening
+  // circles. Returns a p5.Vector, or null if there's nothing open nearby.
+  nearestOpenPoint(x, y) {
+    for (let radius = 4; radius <= 400; radius += 4) {
+      for (let k = 0; k < 16; k += 1) {
+        let angle = (TWO_PI * k) / 16 + radius * 0.1; // twist each ring so we don't favor one direction
+        let px = x + cos(angle) * radius;
+        let py = y + sin(angle) * radius;
+        if (px >= 0 && px <= this.w && py >= 0 && py <= this.h && this.sample(px, py) < this.threshold - 0.005) {
+          return createVector(px, py);
+        }
+      }
+    }
+    return null;
   }
 
   // ---- Marching squares ----
@@ -89,11 +108,18 @@ class TerrainField {
   }
 
   // ---- Drawing (g is in RGB color mode) ----
+  // The scene calls these in order: drawWater, (sunbeams), drawReef.
 
-  draw(g) {
-    this.paintTerrain();
-    g.noSmooth(); // keep the blocky cells crisp when the small image is stretched
-    g.image(this.terrainImage, 0, 0, this.w, this.h);
+  drawWater(g) {
+    this.paintImages();
+    g.noSmooth(); // keep the blocky cells crisp when the small images are stretched
+    g.image(this.waterImage, 0, 0, this.w, this.h);
+    g.smooth();
+  }
+
+  drawReef(g) {
+    g.noSmooth();
+    g.image(this.reefImage, 0, 0, this.w, this.h);
     g.smooth();
 
     // The reef edge: thick white contour lines
@@ -105,31 +131,37 @@ class TerrainField {
     }
   }
 
-  // Shade every cell by its field value. Water is deep navy; reef is near black.
-  // Both get darker toward the bottom of the screen.
-  paintTerrain() {
-    let img = this.terrainImage;
+  // Shade every cell by its field value. Water is navy-blue and gets brighter or deeper with
+  // the noise; reef is near black. Both get a little darker toward the bottom of the screen.
+  // Water cells are see-through in the reef image, and reef cells are see-through in the water image.
+  paintImages() {
+    let water = this.waterImage;
+    let reef = this.reefImage;
     let T = this.threshold;
-    img.loadPixels();
-    for (let py = 0; py < img.height; py += 1) {
-      let depthShade = lerp(1, 0.45, py / img.height); // 1 at the surface, 0.45 at the bottom
-      for (let px = 0; px < img.width; px += 1) {
+    water.loadPixels();
+    reef.loadPixels();
+    for (let py = 0; py < water.height; py += 1) {
+      let depthShade = lerp(1, 0.6, py / water.height); // 1 at the surface, 0.6 at the bottom
+      for (let px = 0; px < water.width; px += 1) {
         let f = this.sample((px + 0.5) * this.imageScale, (py + 0.5) * this.imageScale);
         let t = constrain(map(f, -0.9, 0.9, 0, 1), 0, 1);
-        let r, g, b;
-        if (f > T) {
-          r = lerp(2, 9, t); g = lerp(6, 18, t); b = lerp(18, 44, t);
-        } else {
-          r = lerp(8, 22, t); g = lerp(24, 56, t); b = lerp(60, 120, t);
-        }
-        let p = 4 * (py * img.width + px);
-        img.pixels[p] = r * depthShade;
-        img.pixels[p + 1] = g * depthShade;
-        img.pixels[p + 2] = b * depthShade;
-        img.pixels[p + 3] = 255;
+        let p = 4 * (py * water.width + px);
+
+        // The water image is filled everywhere (so there are never gaps behind the reef edge)
+        water.pixels[p] = lerp(14, 44, t) * depthShade;
+        water.pixels[p + 1] = lerp(56, 126, t) * depthShade;
+        water.pixels[p + 2] = lerp(120, 200, t) * depthShade;
+        water.pixels[p + 3] = 255;
+
+        // The reef image is only filled where the field is above the threshold
+        reef.pixels[p] = lerp(2, 9, t);
+        reef.pixels[p + 1] = lerp(6, 18, t);
+        reef.pixels[p + 2] = lerp(18, 44, t);
+        reef.pixels[p + 3] = f > T ? 255 : 0;
       }
     }
-    img.updatePixels();
+    water.updatePixels();
+    reef.updatePixels();
   }
 }
 
