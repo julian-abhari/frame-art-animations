@@ -10,6 +10,7 @@ let exporting = false;
 let cancelExport = false;
 let exportPreview = null; // graphics shown on the TV while exporting
 let screenRect = { x: 0, y: 0, w: 1, h: 1 };
+let wasFullscreen = false;
 let roomLayer;          // cached wall + floor
 
 function setup() {
@@ -28,6 +29,7 @@ function setup() {
   $('restart').onclick = () => scene.reset();
   $('exportMp4').onclick = onExportClick;
   $('exportPng').onclick = savePng;
+  $('fullscreen').onclick = () => fullscreen(!fullscreen());
   loadScene(0);
 }
 
@@ -67,8 +69,31 @@ function draw() {
     scene.draw(pg);
     pg.pop();
   }
-  image(roomLayer, 0, 0);
-  drawTV(exporting && exportPreview ? exportPreview : pg);
+  let src = exporting && exportPreview ? exportPreview : pg;
+
+  // Entering/leaving fullscreen (button, F key, or Esc): hide the toolbar and resize
+  let isFullscreen = !!fullscreen(); // p5 returns null (not false) when not fullscreen
+  if (isFullscreen !== wasFullscreen) {
+    wasFullscreen = isFullscreen;
+    document.body.classList.toggle('fs', wasFullscreen);
+    windowResized();
+  }
+
+  if (isFullscreen) {
+    drawFullscreen(src);
+  } else {
+    image(roomLayer, 0, 0);
+    drawTV(src);
+  }
+}
+
+// Fullscreen: just the scene, as large as fits, on black (no wall, no TV).
+function drawFullscreen(src) {
+  background(0);
+  let w = min(width, (height * 16) / 9);
+  let h = (w * 9) / 16;
+  screenRect = { x: (width - w) / 2, y: (height - h) / 2, w: w, h: h };
+  image(src, screenRect.x, screenRect.y, screenRect.w, screenRect.h);
 }
 
 // Wall + floor, painted once into their own layer (rebuilt whenever the window resizes).
@@ -95,9 +120,9 @@ function makeRoom() {
 function drawTV(src) {
   // Work out the biggest 16:9 screen that fits, with the frame around it
   let frameFraction = 0.018; // frame thickness as a fraction of screen width
-  let screenW = width * 0.86;
+  let screenW = width * 0.92;
   let screenH = (screenW * 9) / 16;
-  let maxH = height * 0.8;
+  let maxH = height * 0.86;
   if (screenH + screenW * frameFraction * 2 > maxH) {
     screenH = maxH - screenW * frameFraction * 2;
     screenW = (screenH * 16) / 9;
@@ -126,12 +151,6 @@ function drawTV(src) {
   // The screen itself
   image(src, screenRect.x, screenRect.y, screenRect.w, screenRect.h);
 
-  // A little glass glare in the top-left corner
-  fill(255, 255, 255, 5);
-  triangle(screenRect.x, screenRect.y,
-           screenRect.x + screenRect.w * 0.45, screenRect.y,
-           screenRect.x, screenRect.y + screenRect.h * 0.8);
-
   if (exporting) {
     fill(0, 150);
     rect(screenRect.x, screenRect.y, screenRect.w, 28);
@@ -156,6 +175,7 @@ function keyPressed() {
   else if (keyCode === LEFT_ARROW) $('prev').click();
   else if (keyCode === RIGHT_ARROW) $('next').click();
   else if (key === 'r' || key === 'R') $('restart').click();
+  else if (key === 'f' || key === 'F') fullscreen(!fullscreen());
 }
 
 function currentExportSettings() {

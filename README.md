@@ -6,7 +6,8 @@ Generative p5.js art scenes built for a Samsung Frame TV. Scenes render inside a
 
 - Open `index.html` in a recent **Chrome, Edge, or Safari**. No build step and no server needed.
 - Controls (top bar): switch scene, pause, restart, scene sliders, export settings.
-- Keys: `←`/`→` switch scene, `Space` pause, `R` restart.
+- Keys: `←`/`→` switch scene, `Space` pause, `R` restart, `F` fullscreen (`Esc` exits).
+- **Fullscreen** hides the toolbar and shows just the scene, as large as fits on black.
 - Click or drag on the TV to add boids (Scene 1).
 
 ## Scenes

@@ -15,6 +15,8 @@
     #bar input[type=number] { width: 56px; }
     #controls { display: contents; }
     #status { margin-left: auto; color: #f0b070; min-width: 160px; text-align: right; }
+    body.fs #bar { display: none; }
+    body.fs #stage { cursor: none; }
     #stage { flex: 1; min-height: 0; overflow: hidden; }
   </style>
 </head>
@@ -35,6 +37,7 @@
     <label>Seconds <input id="secs" type="number" min="2" max="600" value="30"></label>
     <button id="exportMp4">Export MP4</button>
     <button id="exportPng">Save PNG</button>
+    <button id="fullscreen">Fullscreen</button>
     <span id="status"></span>
   </div>
   <div id="stage"></div>
