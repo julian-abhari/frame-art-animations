@@ -138,7 +138,7 @@ class Boid {
 
   // Hard collision: if we ended up inside a wall, move to the nearest open water and bounce.
   collide(field) {
-    if (field.sample(this.position.x, this.position.y) <= field.threshold) return;
+    if (!field.blocked(this.position.x, this.position.y)) return;
 
     let open = field.nearestOpenPoint(this.position.x, this.position.y);
     if (open === null) return;

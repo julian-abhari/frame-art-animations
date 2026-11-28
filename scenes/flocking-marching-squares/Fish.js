@@ -21,26 +21,34 @@ class Fish extends Boid {
   // `time` is in seconds (it moves the flow field along).
   run(boids, field, params, time) {
     super.run(boids, field, params); // flock, avoid the reef, move
-    this.swim(time);
+    this.swim(field, time);
   }
 
   // Pull the spine along behind the head, pushed around by the flow field.
-  swim(time) {
+  // Then move any joint that ended up in the reef out to open water.
+  swim(field, time) {
     let flow = flowAt(this.position.x, this.position.y, time);
     flow.mult(this.bodyLength * 0.14);
-    this.chain.drag(p5.Vector.add(this.position, flow));
+    let headTarget = p5.Vector.add(this.position, flow);
+    if (field.blocked(headTarget.x, headTarget.y)) headTarget = this.position.copy();
+
+    this.chain.drag(headTarget);
+    this.chain.keepClear(
+      (point) => field.blocked(point.x, point.y),
+      (point) => field.nearestOpenPoint(point.x, point.y)
+    );
   }
 
   // ---- Drawing (g is in RGB color mode) ----
 
   // A tapered line: thick and bright at the head, thin and faint at the tail.
   display(g) {
-    let segments = this.chain.segments;
+    let segments = this.chain.segments; // the LAST segment is the head
     g.strokeCap(ROUND);
-    for (let i = segments.length - 1; i >= 0; i -= 1) {
-      let t = 1 - i / (segments.length - 1); // 1 at the head, 0 at the tail
-      g.stroke(this.headBrightness, lerp(40, 255, t));
-      g.strokeWeight(lerp(0.7, 3, t));
+    for (let i = 0; i < segments.length; i += 1) {
+      let t = i / (segments.length - 1); // 0 at the tail, 1 at the head
+      g.stroke(this.headBrightness, lerp(50, 255, t));
+      g.strokeWeight(lerp(0.6, 6, pow(t, 1.4)));
       g.line(segments[i].start.x, segments[i].start.y, segments[i].end.x, segments[i].end.y);
     }
   }

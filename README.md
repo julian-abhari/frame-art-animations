@@ -21,7 +21,7 @@ Generative p5.js art scenes built for a Samsung Frame TV. Scenes render inside a
 - **Marching squares** is your original sketch: a grid of drifting noise, every cell shaded by its value, with thick lines where the field crosses the threshold. That outline is the reef.
 - **Flocking** (separation, alignment, cohesion) moves the fish, and they bounce off the reef edge.
 - **Inverse kinematics** (from the Multi Inverse Kinematics sketch) makes each fish a thin spine that trails its head. A noise flow field, like the one in the grass sketch, pushes the spines around so the school ripples.
-- **Raycasting** (from the Raycasting sketch) makes the sunbeams. Rays are fired from above the screen and stop at the reef edge. The beams are drawn between the water and the reef, so light never shows inside the reef.
+- **Raycasting** (from the Raycasting sketch) makes the sunbeams. Parallel rays are fired from above the screen through random bands that cover 40% of the width, and they stop at the reef edge. The beams are drawn between the water and the reef, so light never shows inside the reef.
 - **Vapor** (from the Slither sketch) is the bubbles: fish give them off, and they float up and fade.
 
 ## Exporting

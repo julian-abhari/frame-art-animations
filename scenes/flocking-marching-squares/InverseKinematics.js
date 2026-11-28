@@ -61,6 +61,32 @@ class Chain {
     }
   }
 
+  // Move any joint that `isBlocked(point)` says is in the way to somewhere clear, using
+  // `findOpen(point)` to pick a clear spot. Works from the tip back to the base, so every
+  // segment keeps its length. Call this right after drag().
+  keepClear(isBlocked, findOpen) {
+    let previous = this.tip.copy(); // the joint in front of the one we're fixing
+    for (let i = this.segments.length - 1; i >= 0; i -= 1) {
+      let segment = this.segments[i];
+      let wanted = segment.start.copy();
+      let spot;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        // The right distance behind `previous`, in the direction of where we want to be
+        spot = p5.Vector.add(previous, p5.Vector.sub(wanted, previous).setMag(segment.length));
+        if (!isBlocked(spot)) break;
+        let open = findOpen(spot);
+        if (open === null) break;
+        wanted = open;
+      }
+      if (isBlocked(spot)) spot = previous.copy(); // no room: tuck it against the joint in front
+
+      segment.start = spot;
+      segment.end = previous;
+      segment.angle = p5.Vector.sub(previous, spot).heading();
+      previous = spot.copy();
+    }
+  }
+
   // Put the base back on `base` and re-join every segment end to start.
   pinTo(base) {
     this.segments[0].setStart(base);

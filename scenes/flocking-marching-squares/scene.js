@@ -38,7 +38,7 @@ class FlockingMarchingScene {
   // Add a fish at (x, y), or somewhere open if (x, y) is inside the reef.
   addFish(x, y) {
     for (let tries = 0; tries < 200; tries += 1) {
-      if (this.field.sample(x, y) < this.field.threshold - 0.1) {
+      if (!this.field.blocked(x, y, 40)) {
         this.school.push(new Fish(x, y));
         return;
       }

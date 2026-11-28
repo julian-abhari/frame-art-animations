@@ -2,9 +2,9 @@
 //
 // A Ray starts at a point and travels in one direction forever. Cast it against
 // a Boundary (a line segment) to find out where it hits. Cast it against every
-// Boundary and keep the closest hit, and you know what a light can "see".
+// Boundary and keep the closest hit, and you know how far the ray gets.
 //
-// Here the Boundaries are the edges of the coral reef, so sunlight stops when it hits coral.
+// Here the Boundaries are the edges of the reef, so sunlight stops where it hits the reef.
 
 // A wall: one straight line segment from pointA to pointB.
 class Boundary {
@@ -14,10 +14,10 @@ class Boundary {
   }
 }
 
-// A ray: a starting position (shared with whoever owns it) and a unit direction.
+// A ray: a starting position and a unit direction.
 class Ray {
   constructor(position, angle) {
-    this.position = position; // a reference, so moving the light moves its rays
+    this.position = position;
     this.direction = p5.Vector.fromAngle(angle);
   }
 
@@ -52,63 +52,50 @@ class Ray {
   }
 }
 
-// A light made of several "shafts" (bundles of neighboring rays) that all start at one point.
-// Every shaft is drawn as one beam of sunlight.
-class LightSource {
-  constructor(x, y, shaftCount, raysPerShaft) {
-    this.position = createVector(x, y);
-    this.noiseSeed = random(1000); // so every light sways differently
-    this.maxDistance = 1800;       // how far a ray travels if it never hits anything
+// One beam of sunlight: a row of parallel rays starting side by side above the screen.
+// Sunlight is so far away that its rays are parallel, so a beam keeps the same width
+// all the way down.
+class LightBeam {
+  constructor(x, width, rayCount) {
+    this.x = x;
+    this.width = width;
+    this.flicker = random(1000); // noise seed so each beam shimmers differently
+    this.brightness = 1;
+    this.maxDistance = 1800;     // how far a ray goes if it never hits anything
 
-    this.shafts = [];
-    for (let s = 0; s < shaftCount; s += 1) {
-      let rays = [];
-      for (let r = 0; r < raysPerShaft; r += 1) {
-        rays.push(new Ray(this.position, HALF_PI));
-      }
-      this.shafts.push({
-        rays: rays,
-        offset: map(s, 0, shaftCount - 1, -0.14, 0.14) + random(-0.012, 0.012), // angle from the light's center
-        width: random(0.02, 0.06),   // angle between a shaft's first and last ray
-        flicker: random(1000),        // noise seed for this shaft's shimmer
-        brightness: 1,
-        hits: [],                     // filled in by look()
-      });
+    this.rays = [];
+    for (let r = 0; r < rayCount; r += 1) {
+      let startX = x + (width * r) / (rayCount - 1);
+      this.rays.push(new Ray(createVector(startX, -50), HALF_PI));
+    }
+    this.hits = []; // where each ray ended up, filled in by look()
+  }
+
+  // Point every ray the same way.
+  aim(angle) {
+    for (let ray of this.rays) {
+      ray.setAngle(angle);
     }
   }
 
-  // Point every ray: the whole light slowly sways, each shaft spreads its rays evenly.
-  aim(time) {
-    let sway = (noise(this.noiseSeed, time * 0.15) - 0.5) * 0.25;
-    let centerAngle = HALF_PI + 0.25 + sway; // straight down, leaning right like afternoon sun
-    for (let shaft of this.shafts) {
-      for (let r = 0; r < shaft.rays.length; r += 1) {
-        let spread = r / (shaft.rays.length - 1) - 0.5; // -0.5 to 0.5 across the shaft
-        shaft.rays[r].setAngle(centerAngle + shaft.offset + spread * shaft.width);
-      }
-      shaft.brightness = map(noise(shaft.flicker, time * 0.4), 0, 1, 0.3, 1);
-    }
-  }
-
-  // Cast every ray against the walls and remember the closest hit for each one.
+  // Cast every ray against the walls and remember where each one ends.
   look(walls) {
-    for (let shaft of this.shafts) {
-      shaft.hits = [];
-      for (let ray of shaft.rays) {
-        let closest = null;
-        let record = this.maxDistance;
-        for (let wall of walls) {
-          let hit = ray.cast(wall);
-          if (hit !== null) {
-            let distance = dist(this.position.x, this.position.y, hit.x, hit.y);
-            if (distance < record) {
-              record = distance;
-              closest = hit;
-            }
+    this.hits = [];
+    for (let ray of this.rays) {
+      let closest = null;
+      let record = this.maxDistance;
+      for (let wall of walls) {
+        let hit = ray.cast(wall);
+        if (hit !== null) {
+          let distance = dist(ray.position.x, ray.position.y, hit.x, hit.y);
+          if (distance < record) {
+            record = distance;
+            closest = hit;
           }
         }
-        shaft.hits.push({ ray: ray, distance: record, hit: closest });
       }
+      // No hit means the ray left the screen: end it far away
+      this.hits.push(closest !== null ? closest : p5.Vector.add(ray.position, p5.Vector.mult(ray.direction, record)));
     }
   }
 }
